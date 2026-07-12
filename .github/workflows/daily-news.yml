@@ -3,7 +3,7 @@ name: Daily University News to Slack
 on:
   schedule:
     # UTC 22:00 = JST 7:00 (翌日)
-    - cron: "0 22 * * *"
+    - cron: "45 23 * * 0-4"
   workflow_dispatch: {}  # 手動実行用（Actionsタブから "Run workflow" で即テスト可能）
 
 permissions:
