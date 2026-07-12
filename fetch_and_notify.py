@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-大学通信オンライン (univ-online.com) のRSSフィードから
+Googleニュースの検索RSS（全国の大学×AI関連ニュース）から
 新着記事を取得し、Slackに投稿するスクリプト。
 
 GitHub Actions から1日1回実行される想定。
@@ -13,9 +13,17 @@ import sys
 import json
 import datetime
 import urllib.request
+import urllib.parse
 import xml.etree.ElementTree as ET
 
-FEED_URL = "https://univ-online.com/feed/"
+# 検索キーワード。ここを変えれば拾ってくるニュースの範囲を調整できる。
+# 例: 「大学 (AI OR 人工知能 OR 生成AI)」
+SEARCH_QUERY = "大学 (AI OR 人工知能 OR 生成AI)"
+
+FEED_URL = "https://news.google.com/rss/search?" + urllib.parse.urlencode(
+    {"q": SEARCH_QUERY, "hl": "ja", "gl": "JP", "ceid": "JP:ja"}
+)
+
 STATE_FILE = "state.json"
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL")
 
@@ -69,17 +77,27 @@ def parse_items(xml_bytes: bytes):
     for item in root.findall("./channel/item"):
         title = (item.findtext("title") or "").strip()
         link = (item.findtext("link") or "").strip()
+        source = (item.findtext("source") or "").strip()  # Googleニュースの発行元名
         pub_date_raw = (item.findtext("pubDate") or "").strip()
         pub_date = None
         if pub_date_raw:
+            # GoogleニュースのRSSは "Wed, 09 Jul 2026 03:00:00 GMT" のように
+            # "GMT" 表記で終わることが多く、Pythonの %z はこれをそのままでは
+            # 解釈できないため、"+0000" に置き換えてから解析する。
+            normalized = pub_date_raw.replace("GMT", "+0000")
             try:
-                # RFC 822形式 例: "Mon, 01 Jan 2026 07:00:00 +0900"
                 pub_date = datetime.datetime.strptime(
-                    pub_date_raw, "%a, %d %b %Y %H:%M:%S %z"
+                    normalized, "%a, %d %b %Y %H:%M:%S %z"
                 )
             except ValueError:
                 pub_date = None
-        items.append({"title": title, "link": link, "pub_date": pub_date, "pub_date_raw": pub_date_raw})
+        items.append({
+            "title": title,
+            "link": link,
+            "source": source,
+            "pub_date": pub_date,
+            "pub_date_raw": pub_date_raw,
+        })
     return items
 
 
@@ -103,9 +121,10 @@ def post_to_slack(new_items):
     if not new_items:
         text = "本日の新着記事はありませんでした。"
     else:
-        lines = [f"*本日の大学ニュース（{len(new_items)}件）*"]
+        lines = [f"*本日の大学AIニュース（{len(new_items)}件）*"]
         for it in new_items:
-            lines.append(f"• <{it['link']}|{it['title']}>")
+            suffix = f"（{it['source']}）" if it.get("source") else ""
+            lines.append(f"• <{it['link']}|{it['title']}>{suffix}")
         text = "\n".join(lines)
 
     payload = json.dumps({"text": text}).encode("utf-8")
